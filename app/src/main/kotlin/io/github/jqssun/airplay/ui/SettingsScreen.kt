@@ -1,5 +1,6 @@
 package io.github.jqssun.airplay.ui
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -28,6 +29,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.jqssun.airplay.Prefs
 import io.github.jqssun.airplay.R
+import io.github.jqssun.airplay.appSettingsIntent
 import io.github.jqssun.airplay.viewmodel.MainViewModel
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
@@ -147,15 +149,16 @@ fun SettingsScreen(viewModel: MainViewModel) {
             onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
         val needsOverlayPermission = launchOnConnect && !hasOverlayPermission
+        val autoLaunch = launchOnConnect && hasOverlayPermission
         ListItem(
             modifier = Modifier
                 .dpadFocus(RectangleShape)
                 .toggleable(
-                    value = launchOnConnect,
+                    value = autoLaunch,
                     role = Role.Switch,
                     onValueChange = {
                         viewModel.set(Prefs.LAUNCH_ON_CONNECT, it)
-                        if (it && !canAutoLaunch(ctx)) ctx.startActivity(_overlayIntent(ctx))
+                        if (it && !canAutoLaunch(ctx)) _openOverlaySettings(ctx)
                     }
                 ),
             headlineContent = { Text(stringResource(R.string.setting_launch_on_connect)) },
@@ -166,7 +169,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 ))
             },
             trailingContent = {
-                Switch(checked = launchOnConnect, onCheckedChange = null)
+                Switch(checked = autoLaunch, onCheckedChange = null)
             }
         )
 
@@ -441,9 +444,15 @@ fun SettingsScreen(viewModel: MainViewModel) {
 private fun canAutoLaunch(ctx: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || Settings.canDrawOverlays(ctx)
 
-private fun _overlayIntent(ctx: Context): Intent =
-    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+// overlay settings screen may not exist on some builds
+private fun _openOverlaySettings(ctx: Context) {
+    val overlay = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
+    try {
+        ctx.startActivity(overlay.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: ActivityNotFoundException) {
+        ctx.startActivity(ctx.appSettingsIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
 
 @Composable
 private fun SectionHeader(title: String) {

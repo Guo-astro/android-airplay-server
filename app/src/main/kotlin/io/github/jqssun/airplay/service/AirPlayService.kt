@@ -193,7 +193,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     var pinCallback: ((String?) -> Unit)? = null
         set(value) {
             field = value
-            // ui replay only: binding the activity must not mint a new native pin
             value?.invoke(_lastPin)
         }
 
@@ -800,12 +799,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         val firstConnection = _connectionCount.value == 0
         _connectionCount.value++
         log("Sender connected (${_connectionCount.value})")
-        if (!firstConnection) return
-        // conn_init is only a tcp pre-auth signal. pin-required sessions must wait for
-        // onDisplayPin, otherwise the server ui can move before the client pin is current
-        if (requiresPin()) return
-        if (!shouldLaunchOnConnect()) return
-        launchMainActivity()
+        if (firstConnection && shouldLaunchOnConnect()) launchMainActivity()
     }
 
     override fun onConnectionDestroy() {
@@ -844,7 +838,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     }
 
     override fun onDisplayPin(pin: String) {
-        // a new pin is the sync point with the client prompt: show every new value immediately
         if (_lastPin == pin) return
         _lastPin = pin
         pinCallback?.invoke(pin)
@@ -1110,10 +1103,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         foregroundStarted = true
     }
 
-    private fun requiresPin(): Boolean {
-        return prefs[Prefs.REQUIRE_PIN]
-    }
-
     private fun shouldLaunchOnConnect(): Boolean {
         return prefs[Prefs.LAUNCH_ON_CONNECT]
     }
@@ -1145,7 +1134,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             }
         } else {
             if (_lastPin != null) {
-                // passive handoff only: do not launch/reorder the activity during pin auth
                 builder.setContentTitle(getString(R.string.notification_pin_title))
                     .setContentText(getString(R.string.notification_pin_text, _lastPin))
             } else {

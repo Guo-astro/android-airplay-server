@@ -7,11 +7,9 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
-import android.provider.Settings
 import android.util.Rational
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -157,7 +155,7 @@ class MainActivity : ComponentActivity() {
     private fun _requestLocalNetwork() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.CINNAMON_BUN) return
         if (viewModel.localNetwork.value == LocalNetworkAccess.SETTINGS) {
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+            startActivity(appSettingsIntent())
         } else {
             permissions.launch(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK))
         }
