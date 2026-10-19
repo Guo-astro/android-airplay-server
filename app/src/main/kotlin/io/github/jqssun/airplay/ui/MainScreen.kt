@@ -877,7 +877,7 @@ private fun AudioMiniController(viewModel: MainViewModel, visible: Boolean, onCl
     val context = LocalContext.current
     MiniController(
         player,
-        bitmapLoader = remember { DataSourceBitmapLoader(context) },
+        bitmapLoader = remember { DataSourceBitmapLoader.Builder(context).build() },
         onClick = onClick
     )
 }

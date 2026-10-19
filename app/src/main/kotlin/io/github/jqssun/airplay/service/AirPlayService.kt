@@ -28,6 +28,7 @@ import android.view.Surface
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.os.ConfigurationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import androidx.media.app.NotificationCompat as MediaNotificationCompat
@@ -418,7 +419,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         val advertiseMirroring = prefs[Prefs.ADVERTISE_MIRRORING]
         val advertiseAudio = prefs[Prefs.ADVERTISE_AUDIO]
         NativeBridge.nativeSetHlsEnabled(nativeHandle, advertiseVideo)
-        NativeBridge.nativeSetLang(nativeHandle, resources.configuration.locales.toLanguageTags().replace(',', ':'))
+        NativeBridge.nativeSetLang(nativeHandle, ConfigurationCompat.getLocales(resources.configuration).toLanguageTags().replace(',', ':'))
         NativeBridge.nativeSetFeature(nativeHandle, NativeBridge.FT_MIRROR, advertiseMirroring)
         NativeBridge.nativeSetFeature(nativeHandle, NativeBridge.FT_AUDIO, advertiseAudio)
         NativeBridge.nativeSetPlist(nativeHandle, "maxFPS", maxFps)
@@ -514,14 +515,14 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         wakeLock = null
         _serverState.value = ServerState.ERROR
         if (foregroundStarted) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             foregroundStarted = false
         }
     }
 
     fun stopServer() {
         _shutdown()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         foregroundStarted = false
         stopSelf()
     }
