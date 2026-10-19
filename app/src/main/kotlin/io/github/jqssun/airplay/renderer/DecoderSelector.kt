@@ -63,9 +63,9 @@ class DecoderSelector(private val ctx: Context) {
 
     fun avc(): MediaCodecInfo? = _probableSafe(AVC, CodecProfileLevel.AVCProfileHigh) ?: _first(AVC)
 
-    fun hevc(avc: MediaCodecInfo?, w: Int, h: Int, fps: Int): MediaCodecInfo? {
+    fun hevc(avc: MediaCodecInfo?, w: Int, h: Int, fps: Int, force: Boolean): MediaCodecInfo? {
         val info = _probableSafe(HEVC, -1) ?: return null
-        if (_hevcWhitelisted(info)) return info
+        if (force || _hevcWhitelisted(info)) return info
         Log.i(TAG, "hevc decoder not whitelisted: ${info.name}")
         val avcCaps = avc?.videoCaps(AVC) ?: return null
         return info.takeIf { !_canMeet(avcCaps, w, h, fps) && _canMeet(info.videoCaps(HEVC), w, h, fps) }

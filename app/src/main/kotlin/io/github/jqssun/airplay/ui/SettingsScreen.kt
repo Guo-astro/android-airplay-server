@@ -38,7 +38,7 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingsScreen(viewModel: MainViewModel) {
     val serverName by viewModel.pref(Prefs.SERVER_NAME).collectAsState()
-    val h265Enabled by viewModel.pref(Prefs.H265_ENABLED).collectAsState()
+    val h265 by viewModel.pref(Prefs.H265).collectAsState()
     val enforceSdr by viewModel.pref(Prefs.ENFORCE_SDR).collectAsState()
     val alacEnabled by viewModel.pref(Prefs.ALAC_ENABLED).collectAsState()
     val aacEnabled by viewModel.pref(Prefs.AAC_ENABLED).collectAsState()
@@ -75,6 +75,11 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val audioCushionMs by viewModel.pref(Prefs.AUDIO_CUSHION_MS).collectAsState()
     val audioAdaptiveStep by viewModel.pref(Prefs.AUDIO_ADAPTIVE_STEP).collectAsState()
     val oboeBufferFrames by viewModel.pref(Prefs.OBOE_BUFFER_FRAMES).collectAsState()
+    val tri = listOf(
+        Prefs.AUTO to stringResource(R.string.chip_auto),
+        Prefs.ON to stringResource(R.string.chip_on),
+        Prefs.OFF to stringResource(R.string.chip_off),
+    )
 
     Column(
         modifier = Modifier
@@ -206,11 +211,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         SectionHeader(stringResource(R.string.section_decode))
 
-        SettingSwitch(
+        SettingChips(
             title = stringResource(R.string.setting_h265),
             description = stringResource(R.string.setting_h265_desc),
-            checked = h265Enabled,
-            onCheckedChange = { viewModel.set(Prefs.H265_ENABLED, it) }
+            value = h265,
+            options = tri,
+            onValueChange = { viewModel.set(Prefs.H265, it) }
         )
 
         SettingSwitch(
@@ -325,11 +331,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 title = stringResource(R.string.setting_operating_rate),
                 description = stringResource(R.string.setting_operating_rate_desc),
                 value = operatingRate,
-                options = listOf(
-                    Prefs.AUTO to stringResource(R.string.chip_auto),
-                    Prefs.ON to stringResource(R.string.chip_on),
-                    Prefs.OFF to stringResource(R.string.chip_off),
-                ),
+                options = tri,
                 onValueChange = { viewModel.set(Prefs.OPERATING_RATE, it) }
             )
 

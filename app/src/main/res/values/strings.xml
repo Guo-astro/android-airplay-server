@@ -140,7 +140,7 @@
 
     <!-- Settings: Decode -->
     <string name="setting_h265">H.265 (HEVC)</string>
-    <string name="setting_h265_desc">Enable H.265 video decoding if device supports it</string>
+    <string name="setting_h265_desc">Auto only uses H.265 decoders known to work</string>
     <string name="setting_enforce_sdr">MediaFormat.KEY_COLOR_TRANSFER</string>
     <string name="setting_enforce_sdr_desc">Tag video as limited SDR; disable to allow HDR sources to pass through</string>
     <string name="setting_sw_alac">Force software ALAC decoder</string>

@@ -313,8 +313,12 @@ static void _video_play(void *cls, const char *location, const float start_posit
     jstring jloc = (*env)->NewStringUTF(env, location);
     (*env)->CallVoidMethod(env, ctx->callback_obj, ctx->on_video_play, jloc, (jfloat)start_position);
     (*env)->DeleteLocalRef(env, jloc);
-    /* self-driven senders (macOS) latch their scrubber timeline at /play; hold the response
-       until the player reports ready so that read must carry the real duration */
+}
+
+/* self-driven senders (macOS) latch their scrubber timeline at /play; hold the response
+   until the player reports ready so that read must carry the real duration */
+static void _video_wait_ready(void *cls) {
+    android_callback_ctx_t *ctx = (android_callback_ctx_t *)cls;
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += 10; // hold for max 10s
@@ -411,6 +415,7 @@ void android_callbacks_fill(raop_callbacks_t *cbs, android_callback_ctx_t *ctx) 
     cbs->display_pin = _display_pin;
     cbs->video_set_codec = _video_set_codec;
     cbs->on_video_play = _video_play;
+    cbs->on_video_wait_ready = _video_wait_ready;
     cbs->on_video_scrub = _video_scrub;
     cbs->on_video_rate = _video_rate;
     cbs->on_video_stop = _video_stop;

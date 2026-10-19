@@ -400,15 +400,13 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         val overscanned = prefs[Prefs.OVERSCANNED]
         val audioLatencyMs = prefs[Prefs.AUDIO_LATENCY_MS]
         val (reqW, reqH) = _displaySize(clamp = false)
-        val h265 = videoRenderer.selectDecoders(reqW, reqH, maxFps, prefs[Prefs.H265_ENABLED])
+        val h265 = videoRenderer.selectDecoders(reqW, reqH, maxFps, Prefs.forced(prefs[Prefs.H265]))
         val alac = prefs[Prefs.ALAC_ENABLED]
         val aac = prefs[Prefs.AAC_ENABLED]
 
         videoRenderer.enforceSdr = prefs[Prefs.ENFORCE_SDR]
         videoRenderer.keyAllowFrameDrop = prefs[Prefs.KEY_ALLOW_FRAME_DROP]
-        videoRenderer.selector.maxOperatingRate = when (prefs[Prefs.OPERATING_RATE]) {
-            Prefs.ON -> true; Prefs.OFF -> false; else -> null
-        }
+        videoRenderer.selector.maxOperatingRate = Prefs.forced(prefs[Prefs.OPERATING_RATE])
         videoRenderer.benchmarkLog = prefs[Prefs.BENCHMARK_LOG]
         videoRenderer.benchmarkLogCallback = { msg -> logCallback?.invoke(msg) }
         videoRenderer.scheduledOutputBufferRelease = prefs[Prefs.SCHEDULED_OUTPUT_BUFFER_RELEASE]

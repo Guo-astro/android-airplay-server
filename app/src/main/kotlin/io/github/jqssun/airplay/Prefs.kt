@@ -68,18 +68,21 @@ object Prefs {
         IntPref(key, def, range, restart).also(_all::add)
     private fun str(key: String, def: String, restart: Boolean = false, check: (String) -> Boolean = { true }) =
         StrPref(key, def, restart, check).also(_all::add)
+    private fun tri(key: String, restart: Boolean = false) = str(key, AUTO, restart) { it in setOf(AUTO, ON, OFF) }
+
+    fun forced(v: String) = when (v) { ON -> true; OFF -> false; else -> null }
 
     val SERVER_NAME = str("server_name", "Android AirPlay", restart = true)
     val SERVER_PORT = int("server_port", 7000, 1..65535, restart = true)
     val AUTO_START = bool("auto_start", true)
     val BOOT_AUTO_START = bool("boot_auto_start", true)
     val RUN_IN_BACKGROUND = bool("run_in_background", true)
-    val H265_ENABLED = bool("h265_enabled", true, restart = true)
+    val H265 = tri("h265", restart = true)
     val ENFORCE_SDR = bool("enforce_sdr", true, restart = true)
     val KEY_ALLOW_FRAME_DROP = bool(MediaFormat.KEY_ALLOW_FRAME_DROP, true, restart = true)
     val KEY_PRIORITY = bool(MediaFormat.KEY_PRIORITY, true, restart = true)
     val LOW_LATENCY = bool("low_latency", false)
-    val OPERATING_RATE = str("operating_rate", AUTO, restart = true) { it in setOf(AUTO, ON, OFF) }
+    val OPERATING_RATE = tri("operating_rate", restart = true)
     val SCHEDULED_OUTPUT_BUFFER_RELEASE = bool("scheduled_output_buffer_release", false, restart = true)
     val AUDIO_AUTO_BUFFER = bool("audio_auto_buffer", true)
     // fixed cushion ms, used only when AUDIO_AUTO_BUFFER is off
