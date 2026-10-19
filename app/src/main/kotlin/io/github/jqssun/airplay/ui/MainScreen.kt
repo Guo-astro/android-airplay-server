@@ -17,8 +17,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
-import androidx.compose.material.icons.automirrored.rounded.VolumeDown
-import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.BrightnessHigh
@@ -35,11 +33,14 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,7 +61,7 @@ import io.github.jqssun.airplay.ui.gestures.VideoContentScale
 import io.github.jqssun.airplay.ui.gestures.VerticalProgressIndicator
 import io.github.jqssun.airplay.ui.gestures.VideoPlayerGestures
 import io.github.jqssun.airplay.ui.gestures.VolumeAndBrightnessGestureState
-import io.github.jqssun.airplay.ui.gestures.VolumeState
+import io.github.jqssun.airplay.ui.gestures.ServerVolumeState
 import io.github.jqssun.airplay.ui.gestures.ZoomState
 import io.github.jqssun.airplay.viewmodel.DebugInfo
 import io.github.jqssun.airplay.viewmodel.LocalNetworkAccess
@@ -77,6 +78,7 @@ import androidx.media3.ui.compose.material3.indicator.DurationText
 import androidx.media3.ui.compose.material3.indicator.PositionText
 import androidx.media3.ui.compose.material3.indicator.ProgressSlider
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
 private enum class Tab(val labelRes: Int, val icon: ImageVector) {
@@ -192,14 +194,14 @@ fun MainScreen(
         val tapGestureState = remember(viewModel) { TapGestureState(viewModel, gestureScope) }
         val seekGestureState = remember(viewModel) { SeekGestureState(viewModel) }
         val context = LocalContext.current
-        val volumeState = remember { VolumeState(context) }
+        val serverVolume = remember { ServerVolumeState(context) }
         val brightnessState = remember(activity) { activity?.window?.let { BrightnessState(it) } }
-        val volumeAndBrightnessGestureState = remember(volumeState, brightnessState) {
-            VolumeAndBrightnessGestureState(volumeState, brightnessState, gestureScope)
+        val volumeAndBrightnessGestureState = remember(serverVolume, brightnessState) {
+            VolumeAndBrightnessGestureState(serverVolume, brightnessState, gestureScope)
         }
         val zoomState = remember(viewModel) { ZoomState(viewModel, gestureScope) }
         var controlsLocked by remember { mutableStateOf(false) }
-        DisposableEffect(volumeState) { volumeState.handleLifecycle(this) }
+        DisposableEffect(serverVolume) { serverVolume.handleLifecycle(this) }
         LaunchedEffect(overlayTick) {
             if (overlayTick == 0L) {
                 zoomState.reset()
@@ -372,7 +374,7 @@ fun MainScreen(
                 exit = androidx.compose.animation.fadeOut(),
                 modifier = Modifier.align(Alignment.CenterStart).padding(24.dp)
             ) {
-                VerticalProgressIndicator(value = volumeState.percentage, icon = Icons.AutoMirrored.Rounded.VolumeUp)
+                VerticalProgressIndicator(value = serverVolume.percentage, icon = Icons.AutoMirrored.Rounded.VolumeUp)
             }
             androidx.compose.animation.AnimatedVisibility(
                 visible = volumeAndBrightnessGestureState.activeGesture == VerticalGesture.BRIGHTNESS,
@@ -987,24 +989,79 @@ private fun NowPlayingContent(viewModel: MainViewModel) {
                 )
             }
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                IconButton(onClick = { viewModel.audioVolumeDown() }, modifier = Modifier.dpadFocus()) {
-                    Icon(Icons.AutoMirrored.Rounded.VolumeDown, stringResource(R.string.cd_volume_down))
-                }
-                IconButton(onClick = { viewModel.audioMuteToggle() }, modifier = Modifier.dpadFocus()) {
-                    Icon(Icons.AutoMirrored.Rounded.VolumeOff, stringResource(R.string.cd_mute))
-                }
-                IconButton(onClick = { viewModel.audioVolumeUp() }, modifier = Modifier.dpadFocus()) {
-                    Icon(Icons.AutoMirrored.Rounded.VolumeUp, stringResource(R.string.cd_volume_up))
-                }
-            }
+            Spacer(Modifier.height(8.dp))
+
+            val context = LocalContext.current
+            val serverVolume = remember { ServerVolumeState(context) }
+            DisposableEffect(serverVolume) { serverVolume.handleLifecycle(this) }
+            VolumeSlider(
+                icon = painterResource(R.drawable.ic_download),
+                label = stringResource(R.string.volume_server),
+                value = serverVolume.percentage / 100f,
+                onValueChange = { serverVolume.update((it * 100).roundToInt()) },
+                onStep = { serverVolume.adjust(it > 0) }
+            )
+
+            val clientVolume by viewModel.clientVolume.collectAsState()
+            val clientAdjustable by viewModel.clientVolumeAdjustable.collectAsState()
+            // sender reports back only after each dacp step
+            var clientDrag by remember { mutableStateOf<Float?>(null) }
+            val clientShown = clientDrag ?: clientVolume
+            VolumeSlider(
+                icon = painterResource(R.drawable.ic_upload),
+                label = stringResource(R.string.volume_client),
+                value = clientShown,
+                enabled = clientAdjustable,
+                onValueChange = { clientDrag = it; viewModel.setClientVolume(it) },
+                onValueChangeFinished = { clientDrag = null },
+                onStep = { viewModel.setClientVolume((clientShown + it * CLIENT_VOLUME_STEP).coerceIn(0f, 1f)) }
+            )
         }
     }
 }
+
+@Composable
+private fun VolumeSlider(
+    icon: Painter,
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    onStep: (Int) -> Unit,
+    enabled: Boolean = true,
+    onValueChangeFinished: (() -> Unit)? = null
+) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Slider(
+                value = value,
+                onValueChange = onValueChange,
+                enabled = enabled,
+                onValueChangeFinished = onValueChangeFinished,
+                modifier = Modifier
+                    .semantics { contentDescription = label }
+                    .dpadFocus()
+                    .dpadAdjust(onLeft = { onStep(-1) }, onRight = { onStep(1) })
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = stringResource(R.string.volume_value, (value * 100).roundToInt()),
+            style = MaterialTheme.typography.labelLarge,
+            textAlign = TextAlign.End,
+            modifier = Modifier.widthIn(min = 40.dp)
+        )
+    }
+}
+
+// sender has 16 volume steps above mute
+private const val CLIENT_VOLUME_STEP = 1f / 16
 
 private const val VIDEO_OVERLAY_HIDE_MS = 4000L
 
@@ -1042,7 +1099,7 @@ private fun debugOverlaySections(context: Context, info: DebugInfo): List<DebugS
     }.takeIf { it.isNotEmpty() }?.let { add(DebugSection(context.getString(R.string.debug_section_video), it)) }
 
     buildList {
-        if (info.audioCodec.isNotEmpty()) add(context.getString(R.string.debug_audio, info.audioCodec, info.audioVolume))
+        if (info.audioCodec.isNotEmpty()) add(context.getString(R.string.debug_audio, info.audioCodec, info.serverVolume, info.clientVolume))
         info.audio?.let { a ->
             add(context.getString(R.string.debug_audio_buffer, a.backlogMs, a.tunedCushionMs))
             add(context.getString(R.string.debug_audio_glitch, a.trims, a.drops, a.silences, a.underruns, a.xrun))

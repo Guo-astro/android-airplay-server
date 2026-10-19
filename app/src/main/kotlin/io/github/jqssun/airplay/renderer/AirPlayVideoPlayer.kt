@@ -33,6 +33,7 @@ class AirPlayVideoPlayer(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
     private var pendingSurface: Surface? = null
+    private var clientGain = 1f
 
     var onPlaybackInfo: ((PlaybackSnapshot) -> Unit)? = null
     var onVideoSize: ((width: Int, height: Int, aspect: Float) -> Unit)? = null
@@ -74,6 +75,7 @@ class AirPlayVideoPlayer(private val context: Context) {
         val p = ExoPlayer.Builder(context).build().also {
             it.addListener(_listener)
             pendingSurface?.let { s -> it.setVideoSurface(s) }
+            it.volume = clientGain
         }
         player = p
         p.setMediaItem(MediaItem.fromUri(location), (startPositionSeconds * 1000).toLong())
@@ -111,6 +113,12 @@ class AirPlayVideoPlayer(private val context: Context) {
     // local speed toggle: unlike setRate it must not resume a paused player
     fun setSpeed(speed: Float) = mainHandler.post {
         player?.playbackParameters = PlaybackParameters(speed.coerceAtLeast(0.1f))
+    }
+
+    // linear, unity unless sender volume isn't synced to receiver
+    fun setClientGain(gain: Float) = mainHandler.post {
+        clientGain = gain
+        player?.volume = gain
     }
 
     fun setSkipSilence(enabled: Boolean) = mainHandler.post {

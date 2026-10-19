@@ -96,6 +96,12 @@ struct AudioEngine {
         mDecoder = {};
     }
 
+    void setClientGain(float g) {
+        std::lock_guard<std::mutex> lk(mRebuildLock);
+        mClientGain = g;
+        if (mOutput) mOutput->setClientGain(g);
+    }
+
     void onFormat(int ct, int spf) {
         const int i = ctIndex(ct);
         if (i < 0 || spf <= 0) return;
@@ -168,6 +174,7 @@ private:
                                                      cfg.staticCushionMs, cfg.percentilePct);
         mOutput = AudioOutput::create(mSampleRate, mChannels, cfg.oboeBufferFrames,
                                       cfg.lowLatency, mTimeline, mLog);
+        mOutput->setClientGain(mClientGain);  // carry current level across rebuild
         mApplied = std::make_unique<AudioConfig>(cfg);
     }
 
@@ -185,6 +192,7 @@ private:
     std::shared_ptr<AudioOutput> mOutput;      // guarded by mRebuildLock
     bool mRunning = false;                     // requested output state, guarded by mRebuildLock
     bool mOutputActive = false;                // actual output state, guarded by mRebuildLock
+    float mClientGain = 1.0f;                  // last-set sender gain, guarded by mRebuildLock
 
     LatencyReporter mDecLatency{"decode", *mLog};
     // decoder + codec/config it was built with
@@ -230,6 +238,10 @@ bool audio_engine_configure(AudioEngine *engine, int cushionMs, int percentilePc
     if (!engine) return false;
     return engine->configure({cushionMs, percentilePct, oboeBufferFrames, forceSwAlac, forceSwAac,
                               realtimePriority, lowLatency, benchmarkLog});
+}
+
+void audio_engine_set_client_gain(AudioEngine *engine, float gain) {
+    if (engine) engine->setClientGain(gain);
 }
 
 void audio_engine_on_format(AudioEngine *engine, int ct, int spf) {

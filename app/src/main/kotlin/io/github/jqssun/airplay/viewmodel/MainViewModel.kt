@@ -3,7 +3,6 @@ package io.github.jqssun.airplay.viewmodel
 import android.app.Application
 import android.content.Context
 import android.content.Intent
-import android.media.AudioManager
 import android.os.SystemClock
 import android.view.Surface
 import androidx.core.content.FileProvider
@@ -58,7 +57,8 @@ data class DebugInfo(
     val droppedFrames: Long = 0,
     val framePacingJitterUs: Long = 0,
     val audioCodec: String = "",
-    val audioVolume: Int = 100,
+    val serverVolume: Int = 100,
+    val clientVolume: Int = 100,
     val audio: AudioDebug? = null,
     val connections: Int = 0,
 ) {
@@ -80,21 +80,19 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
 
     private val prefs = app.getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
     private val logFile = File(app.filesDir, "airplay_logs.txt")
-    private val audioManager = app.getSystemService(AudioManager::class.java)
     private var service: AirPlayService? = null
     val dacpPlayer: Player? get() = service?.dacpPlayer
 
-    fun audioVolumeUp() {
-        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0)
-    }
-    fun audioVolumeDown() {
-        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0)
-    }
     fun audioScanBegin(forward: Boolean) {
         service?.dacpController?.let { if (forward) it.beginFastForward() else it.beginRewind() }
     }
     fun audioScanEnd() { service?.dacpController?.playResume() }
-    fun audioMuteToggle() { service?.dacpController?.muteToggle() }
+
+    private val _clientVolume = MutableStateFlow(1f)
+    val clientVolume: StateFlow<Float> = _clientVolume.asStateFlow()
+    private val _clientVolumeAdjustable = MutableStateFlow(false)
+    val clientVolumeAdjustable: StateFlow<Boolean> = _clientVolumeAdjustable.asStateFlow()
+    fun setClientVolume(frac: Float) { service?.setClientVolume(frac) }
 
     private val _serverState = MutableStateFlow(ServerState.STOPPED)
     val serverState: StateFlow<ServerState> = _serverState.asStateFlow()
@@ -424,6 +422,8 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
             }
             _mirroringActive.value = it.mirroringActive.value
             _trackInfo.value = it.trackInfo.value
+            _clientVolume.value = it.clientVolume()
+            _clientVolumeAdjustable.value = it.dacpController?.ready == true
             if (pref(Prefs.DEBUG_ENABLED).value) {
                 _debugInfo.value = it.collectDebugInfo()
             }

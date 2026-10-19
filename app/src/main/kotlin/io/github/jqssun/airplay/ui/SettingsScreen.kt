@@ -60,6 +60,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val audioLatencyMs by viewModel.pref(Prefs.AUDIO_LATENCY_MS).collectAsState()
     val forceSwAlac by viewModel.pref(Prefs.FORCE_SW_ALAC).collectAsState()
     val forceSwAac by viewModel.pref(Prefs.FORCE_SW_AAC).collectAsState()
+    val syncClientVolume by viewModel.pref(Prefs.SYNC_CLIENT_VOLUME).collectAsState()
     val debugEnabled by viewModel.pref(Prefs.DEBUG_ENABLED).collectAsState()
     val developerOptions by viewModel.pref(Prefs.DEVELOPER_OPTIONS).collectAsState()
     val keyAllowFrameDrop by viewModel.pref(Prefs.KEY_ALLOW_FRAME_DROP).collectAsState()
@@ -221,6 +222,13 @@ fun SettingsScreen(viewModel: MainViewModel) {
             description = stringResource(R.string.setting_sw_aac_desc),
             checked = forceSwAac,
             onCheckedChange = { viewModel.set(Prefs.FORCE_SW_AAC, it) }
+        )
+
+        SettingSwitch(
+            title = stringResource(R.string.setting_sync_client_volume),
+            description = stringResource(R.string.setting_sync_client_volume_desc),
+            checked = syncClientVolume,
+            onCheckedChange = { viewModel.set(Prefs.SYNC_CLIENT_VOLUME, it) }
         )
 
         SectionHeader(stringResource(R.string.section_developer))

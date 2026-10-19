@@ -92,6 +92,8 @@ object Prefs {
     val FORCE_SW_ALAC = bool("force_sw_alac", true)
     val FORCE_SW_AAC = bool("force_sw_aac", false)
     val AAC_ENABLED = bool("aac_enabled", true, restart = true)
+    // on: sender volume drives receiver volume; off: volume = receiver volume x sender volume
+    val SYNC_CLIENT_VOLUME = bool("sync_client_volume", true)
     val RESOLUTION = str("resolution", AUTO, restart = true) { it in setOf(AUTO, PORTRAIT, LANDSCAPE) || SIZE.matches(it) }
     val MAX_FPS = int("max_fps", 60, 1..Int.MAX_VALUE, restart = true)
     val OVERSCANNED = bool("overscanned", false, restart = true)

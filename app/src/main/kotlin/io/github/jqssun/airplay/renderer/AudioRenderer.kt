@@ -9,6 +9,7 @@ class AudioRenderer {
     @Volatile var config = AudioConfig(); private set
 
     @Volatile var codecLabel = ""; private set
+    @Volatile var clientGain = 1f; private set
 
     private var serverHandle = 0L
 
@@ -16,6 +17,7 @@ class AudioRenderer {
     fun attachEngine(server: Long) {
         serverHandle = server
         pushConfig()
+        NativeBridge.nativeServerAudioSetClientGain(serverHandle, clientGain)
     }
 
     @Synchronized
@@ -37,6 +39,12 @@ class AudioRenderer {
         if (serverHandle == 0L) return
         NativeBridge.nativeServerAudioStop(serverHandle)
         codecLabel = ""
+    }
+
+    @Synchronized
+    fun setClientGain(gain: Float) {
+        clientGain = gain
+        if (serverHandle != 0L) NativeBridge.nativeServerAudioSetClientGain(serverHandle, gain)
     }
 
     @Synchronized

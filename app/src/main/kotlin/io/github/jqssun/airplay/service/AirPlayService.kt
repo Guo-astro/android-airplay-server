@@ -37,6 +37,7 @@ import io.github.jqssun.airplay.R
 import io.github.jqssun.airplay.changes
 import io.github.jqssun.airplay.get
 import io.github.jqssun.airplay.hasLocalNetwork
+import io.github.jqssun.airplay.observe
 import io.github.jqssun.airplay.realDisplaySize
 import io.github.jqssun.airplay.audio.DacpController
 import io.github.jqssun.airplay.audio.DacpPlayer
@@ -57,6 +58,7 @@ import io.github.jqssun.airplay.viewmodel.DebugInfo
 import java.net.NetworkInterface
 import java.security.SecureRandom
 import kotlin.math.abs
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -173,15 +175,16 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     private var mediaSession: MediaSessionCompat? = null
     private var mediaReceiver: BroadcastReceiver? = null
     private var volumeReceiver: BroadcastReceiver? = null
-    private var _pendingVolEchoes = 0
-    // senders park volume at -30 as route closes; session must not leave device silenced
-    private var _preZeroIdx = -1
-    @Volatile private var _senderFrac = -1f
-    private var _volSyncTarget = -1f
-    private var _volSyncHint = 0
-    private var _volSyncDir = 0
-    private var _volSyncSteps = 0
-    private val _volSyncTimeout = Runnable { _volSyncEnd() }
+    @Volatile private var _syncClientVol = Prefs.SYNC_CLIENT_VOLUME.def
+    private var _pendingServerVolEchoes = 0
+    // senders park volume at -30 as route closes
+    private var _serverPreZeroIdx = -1
+    @Volatile private var _clientVol: Float? = null
+    private var _clientVolTarget = -1f
+    private var _clientVolHint = 0
+    private var _clientVolDir = 0
+    private var _clientVolSteps = 0
+    private val _clientVolTimeout = Runnable { _clientVolDriveEnd() }
 
     var logCallback: ((String) -> Unit)? = null
 
@@ -291,17 +294,12 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
                 val idx = intent.getIntExtra(VolumeBroadcast.EXTRA_VALUE, -1)
                 val prev = intent.getIntExtra(VolumeBroadcast.EXTRA_PREV_VALUE, -1)
                 if (idx < 0 || prev < 0 || idx == prev) return
-                if (_pendingVolEchoes > 0) { _pendingVolEchoes--; return }
-                if (_connectionCount.value == 0) return
-                val target = idx.toFloat() / audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                Log.d(TAG, "local volume $prev -> $idx, sync sender to $target")
-                _preZeroIdx = -1
-                val active = _volSyncTarget >= 0f
-                _volSyncTarget = target
-                _volSyncHint = if (idx > prev) 1 else -1
-                _volSyncDir = 0
-                _volSyncSteps = 0
-                if (!active) _volSyncStep()
+                if (_pendingServerVolEchoes > 0) { _pendingServerVolEchoes--; return }
+                if (!_syncClientVol || _connectionCount.value == 0) return
+                val target = idx.toFloat() / _serverVolMax()
+                Log.d(TAG, "receiver volume $prev -> $idx, sync sender to $target")
+                _serverPreZeroIdx = -1
+                _driveClientVol(target, if (idx > prev) 1 else -1)
             }
         }
         ContextCompat.registerReceiver(this, volumeReceiver, IntentFilter(VolumeBroadcast.ACTION),
@@ -333,6 +331,13 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             prefs.audioConfigFlow()
                 .debounce(AUDIO_CONFIG_DEBOUNCE_MS)
                 .collect { audioRenderer.updateConfig(it) }
+        }
+        lifecycleScope.launch {
+            prefs.observe { this[Prefs.SYNC_CLIENT_VOLUME] }.collect {
+                _syncClientVol = it
+                _clientVolDriveEnd()
+                _applyClientVol()
+            }
         }
         lifecycleScope.launch {
             prefs.changes()
@@ -557,6 +562,9 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         _durationMs.value = 0
         _serverState.value = ServerState.STOPPED
         _connectionCount.value = 0
+        _clientVol = null
+        _clientVolDriveEnd()
+        _applyClientVol()
         _refreshDacpPlayer()
         log("Server stopped")
     }
@@ -693,66 +701,104 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         log("Video size: ${srcW}x${srcH} -> ${w}x${h}")
     }
 
-    override fun onVolumeChange(volume: Float) {
-        val frac = if (volume <= -144f) 0f else ((volume + 30f) / 30f).coerceIn(0f, 1f)
-        _senderFrac = frac
-        Log.d(TAG, "volume ${volume}dB, frac $frac")
+    override fun onClientVolume(db: Float) {
+        val frac = _dbToFrac(db)
+        _clientVol = frac
+        Log.d(TAG, "sender volume ${db}dB, frac $frac")
         _mainHandler.post {
-            if (_volSyncTarget >= 0f) {
-                _volSyncStep()
-                return@post
-            }
-            val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            val cur = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-            val idx = (frac * max).roundToInt()
-            _preZeroIdx = if (idx == 0) (if (_preZeroIdx < 0) cur else _preZeroIdx) else -1
-            if (idx != cur) {
-                _pendingVolEchoes++
-                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, idx, 0)
-            }
+            val driving = _clientVolTarget >= 0f
+            if (driving) _clientVolStep()
+            if (!driving || !_syncClientVol) _applyClientVol()
         }
     }
 
-    override fun onClientVolume(): Float {
-        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        val vol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val db = if (vol == 0) -144f else -30f + 30f * vol / max
-        Log.d(TAG, "client volume query: $vol/$max -> ${db}dB")
+    override fun onClientVolumeQuery(): Float {
+        val db = _fracToDb(_clientVolExpected())
+        Log.d(TAG, "sender volume query -> ${db}dB")
         return db
     }
 
-    private fun _volSyncStep() {
-        _mainHandler.removeCallbacks(_volSyncTimeout)
-        val target = _volSyncTarget
+    private fun _clientVolExpected(): Float = if (_syncClientVol) _serverVolFrac() else _clientVol ?: 1f
+
+    fun clientVolume(): Float = _clientVol ?: _clientVolExpected()
+
+    // synced: receiver volume broadcast then drives sender
+    fun setClientVolume(frac: Float) {
+        if (_syncClientVol) {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, _serverVolIdx(frac), 0)
+            return
+        }
+        _driveClientVol(frac, if (frac > clientVolume()) 1 else -1)
+    }
+
+    private fun _applyClientVol() {
+        val frac = _clientVol
+        if (!_syncClientVol) {
+            _setClientGain(_clientGain(frac ?: 1f))
+            return
+        }
+        _setClientGain(1f)
+        if (frac == null) return
+        val cur = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val idx = _serverVolIdx(frac)
+        _serverPreZeroIdx = if (idx == 0) (if (_serverPreZeroIdx < 0) cur else _serverPreZeroIdx) else -1
+        if (idx != cur) {
+            _pendingServerVolEchoes++
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, idx, 0)
+        }
+    }
+
+    private fun _setClientGain(gain: Float) {
+        if (gain == audioRenderer.clientGain) return
+        audioRenderer.setClientGain(gain)
+        airPlayVideoPlayer.setClientGain(gain)
+    }
+
+    private fun _serverVolMax() = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    private fun _serverVolIdx(frac: Float) = (frac * _serverVolMax()).roundToInt()
+    private fun _serverVolFrac() = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / _serverVolMax()
+
+    private fun _driveClientVol(target: Float, hint: Int) {
+        val active = _clientVolTarget >= 0f
+        _clientVolTarget = target
+        _clientVolHint = hint
+        _clientVolDir = 0
+        _clientVolSteps = 0
+        if (!active) _clientVolStep()
+    }
+
+    private fun _clientVolStep() {
+        _mainHandler.removeCallbacks(_clientVolTimeout)
+        val target = _clientVolTarget
         if (target < 0f) return
-        val frac = _senderFrac
+        val frac = _clientVol
         val want = when {
-            frac < 0f -> _volSyncHint
-            abs(target - frac) <= VOL_SYNC_EPS -> 0
+            frac == null -> _clientVolHint
+            abs(target - frac) <= CLIENT_VOL_EPS -> 0
             target > frac -> 1
             else -> -1
         }
-        if (want == 0 || (_volSyncDir != 0 && want != _volSyncDir) || _volSyncSteps >= VOL_SYNC_MAX_STEPS) {
-            _volSyncEnd()
+        if (want == 0 || (_clientVolDir != 0 && want != _clientVolDir) || _clientVolSteps >= CLIENT_VOL_MAX_STEPS) {
+            _clientVolDriveEnd()
             return
         }
-        _volSyncDir = want
-        _volSyncSteps++
+        _clientVolDir = want
+        _clientVolSteps++
         if (want > 0) dacpController?.volumeUp() else dacpController?.volumeDown()
-        _mainHandler.postDelayed(_volSyncTimeout, VOL_SYNC_TIMEOUT_MS)
+        _mainHandler.postDelayed(_clientVolTimeout, CLIENT_VOL_TIMEOUT_MS)
     }
 
-    private fun _volSyncEnd() {
-        _mainHandler.removeCallbacks(_volSyncTimeout)
-        if (_volSyncTarget >= 0f) Log.d(TAG, "volume sync done: sender $_senderFrac, target $_volSyncTarget")
-        _volSyncTarget = -1f
-        _volSyncDir = 0
+    private fun _clientVolDriveEnd() {
+        _mainHandler.removeCallbacks(_clientVolTimeout)
+        if (_clientVolTarget >= 0f) Log.d(TAG, "sender volume drive done: sender $_clientVol, target $_clientVolTarget")
+        _clientVolTarget = -1f
+        _clientVolDir = 0
     }
 
     override fun onConnectionInit() {
         val firstConnection = _connectionCount.value == 0
         _connectionCount.value++
-        log("Client connected (${_connectionCount.value})")
+        log("Sender connected (${_connectionCount.value})")
         if (!firstConnection) return
         // conn_init is only a tcp pre-auth signal. pin-required sessions must wait for
         // onDisplayPin, otherwise the server ui can move before the client pin is current
@@ -776,19 +822,20 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             _positionMs.value = 0
             _durationMs.value = 0
             dacpController?.reset()
-            _senderFrac = -1f
+            _clientVol = null
             _mainHandler.post {
-                _volSyncEnd()
-                if (_preZeroIdx >= 0) {
-                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, _preZeroIdx, 0)
-                    _preZeroIdx = -1
+                _clientVolDriveEnd()
+                if (_serverPreZeroIdx >= 0) {
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, _serverPreZeroIdx, 0)
+                    _serverPreZeroIdx = -1
                 }
+                _applyClientVol()
             }
             mediaSession?.isActive = false
             _refreshDacpPlayer()
             _updateMediaNotification()
         }
-        log("Client disconnected (${_connectionCount.value})")
+        log("Sender disconnected (${_connectionCount.value})")
     }
 
     override fun onConnectionReset(reason: Int) {
@@ -978,8 +1025,8 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         droppedFrames = videoRenderer.droppedFrames,
         framePacingJitterUs = videoRenderer.framePacingJitterUs,
         audioCodec = audioRenderer.codecLabel,
-        audioVolume = 100 * audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) /
-            audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+        serverVolume = 100 * audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) / _serverVolMax(),
+        clientVolume = (100 * clientVolume()).roundToInt(),
         audio = audioRenderer.audioDebug(),
         connections = _connectionCount.value,
     )
@@ -1144,9 +1191,9 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     companion object {
         private const val TAG = "AirPlayService"
-        private const val VOL_SYNC_EPS = 0.033f
-        private const val VOL_SYNC_MAX_STEPS = 32
-        private const val VOL_SYNC_TIMEOUT_MS = 800L
+        private const val CLIENT_VOL_EPS = 0.033f
+        private const val CLIENT_VOL_MAX_STEPS = 32
+        private const val CLIENT_VOL_TIMEOUT_MS = 800L
         private const val CHANNEL_ID = "airplay_service"
         private const val NOTIFICATION_ID = 1
         const val ACTION_PLAY_PAUSE = "io.github.jqssun.airplay.PLAY_PAUSE"
@@ -1159,5 +1206,10 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
         private const val AUDIO_CONFIG_DEBOUNCE_MS = 500L
         private const val SERVER_RESTART_DEBOUNCE_MS = 500L
+
+        // airplay volume is linear in dB along sender slider
+        private fun _dbToFrac(db: Float) = if (db <= -144f) 0f else ((db + 30f) / 30f).coerceIn(0f, 1f)
+        private fun _fracToDb(frac: Float) = if (frac <= 0f) -144f else -30f + 30f * frac
+        private fun _clientGain(frac: Float) = if (frac <= 0f) 0f else 10f.pow(_fracToDb(frac) / 20f)
     }
 }
